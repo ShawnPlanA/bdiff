@@ -27,7 +27,7 @@ static inline void print_diff(unsigned long global_pos, unsigned int diff_mask, 
 	int i;
 	unsigned int mask;
 
-	printf("%08x: ", global_pos);
+	printf("%08lx: ", global_pos);
 
 	for(i = 0; i < length; i++)	
 	{
@@ -62,7 +62,7 @@ static inline void print_file1(unsigned char *buf, long length)
 
 	while(least > 0)
 	{
-		printf("%08x: ", global_pos);
+		printf("%08lx: ", global_pos);
 
 		len = min((long)least, (long)LINE_LENGTH);
 
@@ -95,7 +95,7 @@ static inline void print_file2(unsigned char *buf, long length)
 
 	while(least > 0)
 	{
-		printf("%08x: ", global_pos);
+		printf("%08lx: ", global_pos);
 
 		i = LINE_LENGTH;
 		while(i--)
@@ -116,19 +116,23 @@ static inline void print_file2(unsigned char *buf, long length)
 	}
 }
 
-static inline long get_file_size(int fd, int *block_size)
+static inline int get_file_stat(int fd, long *file_size, int *block_size)
 {
 	struct stat f_stat;
 
 	if (fstat(fd, &f_stat) < 0)
 	{
+		*file_size = -1;
 		*block_size = -1;
+
 		return -1;
 	}
 	else
 	{
 		*block_size = f_stat.st_blksize;
-		return (long)f_stat.st_size;
+		*file_size = (long)f_stat.st_size;
+	
+		return 0;
 	}
 }
 
@@ -143,10 +147,10 @@ int main(int argc, char *argv[])
 	unsigned char *p1, *p2;
 	unsigned int mask;
 	long length, least;
-	int buf_least;
 	int i, pos;
 	int blksize;
-	int bufsize;
+	int bufsize, buf_least;
+	int read_size;
 
 	if (argc < 2)
 	{
@@ -167,7 +171,7 @@ int main(int argc, char *argv[])
 		goto EXIT1;
 	}
 
-	length1 = get_file_size(fd1, &blksize);
+	get_file_stat(fd1, &length1, &blksize);
 
 	fd2 = open(file2, O_RDONLY);	
 	if (fd2 == -1)
@@ -176,10 +180,9 @@ int main(int argc, char *argv[])
 		goto EXIT2;
 	}
 
-	length2 = get_file_size(fd2, &blksize);
+	get_file_stat(fd2, &length2, &blksize);
 
 	least = length = min(length1, length2), LINE_LENGTH; 
-
 	bufsize = (max(length1, length2) < blksize) ? length : blksize;
 
 	buf1 = malloc(bufsize * sizeof(unsigned char));
@@ -187,9 +190,9 @@ int main(int argc, char *argv[])
 
 	while(least > 0)
 	{
-		bufsize = bufsize < least ? bufsize : least;
-		len1 = read(fd1, buf1, bufsize);
-		len2 = read(fd2, buf2, bufsize);
+		read_size = min((long)bufsize, least);
+		len1 = read(fd1, buf1, read_size);
+		len2 = read(fd2, buf2, read_size);
 
 		if (len1 != len2)
 		{
@@ -199,7 +202,7 @@ int main(int argc, char *argv[])
 
 		pos = 0;
 		buf_least = min(len1, len2);
-		while(buf_least)
+		while(buf_least > 0)
 		{
 			line1 = buf1 + pos;
 			line2 = buf2 + pos;
@@ -236,9 +239,10 @@ int main(int argc, char *argv[])
 	if (length1 - length > 0)
 	{
 		least = length1 - length;
+		read_size = min((long)least, (long)bufsize);
 		while(least > 0)
 		{
-			len1 = read(fd1, buf1, bufsize);
+			len1 = read(fd1, buf1, read_size);
 			print_file1(buf1, len1);
 			
 			least -= len1;
@@ -247,10 +251,10 @@ int main(int argc, char *argv[])
 	else if (length2 - length > 0)
 	{
 		least = length2 - length;
-
+		read_size = min((long)least, (long)bufsize);
 		while(least > 0)
 		{
-			len2 = read(fd2, buf2, bufsize);
+			len2 = read(fd2, buf2, read_size);
 			print_file2(buf2, len2);
 			
 			least -= len2;
