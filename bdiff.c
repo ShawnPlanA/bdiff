@@ -22,7 +22,8 @@
 
 static unsigned long global_pos = 0; 
 
-static inline void print_diff(unsigned long global_pos, unsigned int diff_mask, unsigned char *line1, unsigned char *line2, int length)
+static inline void print_diff(unsigned long global_pos, unsigned int diff_mask, 
+		uint8 *line1, uint8 *line2, int length)
 {
 	int i;
 	unsigned int mask;
@@ -31,13 +32,15 @@ static inline void print_diff(unsigned long global_pos, unsigned int diff_mask, 
 
 	for(i = 0; i < length; i++)	
 	{
+		if (line1[i] == 0xff && line1[i+1] == 0xff)
+			break;
 		mask = diff_mask & (1 << i);
 		printf("%c%02X%c", mask ? '[' : ' ', (unsigned int)line1[i], mask ? ']' : ' ');
 	}
 
-	if (length < LINE_LENGTH)
+	if (i < LINE_LENGTH)
 	{
-		i = LINE_LENGTH - length;
+		i = LINE_LENGTH - i;
 		while(i--)
 			printf("    ");
 	}
@@ -46,6 +49,8 @@ static inline void print_diff(unsigned long global_pos, unsigned int diff_mask, 
 
 	for(i = 0; i < length; i++)	
 	{
+		if (line2[i] == 0xff && line2[i+1] == 0xff)
+			break;
 		mask = diff_mask & (1 << i);
 		printf("%c%02X%c", mask ? '[' : ' ', (unsigned int)line2[i], mask ? ']' : ' ');
 	}
@@ -53,12 +58,12 @@ static inline void print_diff(unsigned long global_pos, unsigned int diff_mask, 
 	printf("\n");
 }
 
-static inline void print_file1(unsigned char *buf, long length)
+static inline void print_file1(uint8 *buf, long length)
 {
 	int i;
 	long least = length;
 	int len;
-	unsigned char *p = buf;
+	uint8 *p = buf;
 
 	while(least > 0)
 	{
@@ -80,18 +85,18 @@ static inline void print_file1(unsigned char *buf, long length)
 		}
 
 		printf(" || \n");
-	
+
 		least -= len;
 		global_pos += len;
 	}
 }
 
-static inline void print_file2(unsigned char *buf, long length)
+static inline void print_file2(uint8 *buf, long length)
 {
 	int i;
 	long least = length;
 	int len;
-	unsigned char *p = buf;
+	uint8 *p = buf;
 
 	while(least > 0)
 	{
@@ -116,24 +121,30 @@ static inline void print_file2(unsigned char *buf, long length)
 	}
 }
 
-static inline int get_file_stat(int fd, long *file_size, int *block_size)
+static inline long get_file_length(int fd)
 {
 	struct stat f_stat;
 
 	if (fstat(fd, &f_stat) < 0)
-	{
-		*file_size = -1;
-		*block_size = -1;
+		return -1;
+	else
+		return (long)f_stat.st_size;
+}
 
+static inline int get_block_size(void )
+{
+	struct stat f_stat;
+	int fd = open(".", O_RDONLY);
+
+	if (fd == -1)
+	{
 		return -1;
 	}
+
+	if (fstat(fd, &f_stat) < 0)
+		return -2;
 	else
-	{
-		*block_size = f_stat.st_blksize;
-		*file_size = (long)f_stat.st_size;
-	
-		return 0;
-	}
+		return f_stat.st_blksize;
 }
 
 int main(int argc, char *argv[])
@@ -142,9 +153,9 @@ int main(int argc, char *argv[])
 	char *file1, *file2;
 	long length1, length2;
 	int len1, len2, len;
-	unsigned char *buf1, *buf2;
-	unsigned char *line1, *line2;
-	unsigned char *p1, *p2;
+	uint8 *buf1, *buf2;
+	uint8 *line1, *line2;
+	uint8 *p1, *p2;
 	unsigned int mask;
 	long length, least;
 	int i, pos;
@@ -155,14 +166,18 @@ int main(int argc, char *argv[])
 	if (argc < 2)
 	{
 		printf("Make sure that the input parameters !\n");
-		printf("please as:\n");
+		printf("please input as:\n");
 		printf("          %s file1 file2\n", argv[0]);
 
 		goto EXIT1;
 	}
+	else
+	{
+		file1 = argv[1];
+		file2 = argv[2];
+	}
 
-	file1 = argv[1];
-	file2 = argv[2];
+	blksize = get_block_size();
 
 	fd1 = open(file1, O_RDONLY);
 	if (fd1 == -1)
@@ -170,8 +185,7 @@ int main(int argc, char *argv[])
 		printf("Please check %s is right !\n", file1);
 		goto EXIT1;
 	}
-
-	get_file_stat(fd1, &length1, &blksize);
+	length1 = get_file_length(fd1);
 
 	fd2 = open(file2, O_RDONLY);	
 	if (fd2 == -1)
@@ -179,29 +193,30 @@ int main(int argc, char *argv[])
 		printf("Please check %s is right !\n", file2);
 		goto EXIT2;
 	}
+	length2 = get_file_length(fd2);
 
-	get_file_stat(fd2, &length2, &blksize);
+	least = length = max(length1, length2); 
+	bufsize = min(max(length1, length2), (long)blksize);
+	bufsize = alignment(bufsize, LINE_LENGTH);
 
-	least = length = min(length1, length2), LINE_LENGTH; 
-	bufsize = (max(length1, length2) < blksize) ? length : blksize;
+	buf1 = malloc(bufsize * sizeof(uint8));
+	buf2 = malloc(bufsize * sizeof(uint8));
 
-	buf1 = malloc(bufsize * sizeof(unsigned char));
-	buf2 = malloc(bufsize * sizeof(unsigned char));
-
+	read_size = bufsize;
 	while(least > 0)
 	{
-		read_size = min((long)bufsize, least);
+		//read_size = max(min((long)bufsize, least), (long)LINE_LENGTH);
 		len1 = read(fd1, buf1, read_size);
 		len2 = read(fd2, buf2, read_size);
 
-		if (len1 != len2)
-		{
-			printf("read file error (len1=%d, len2=%d)\n", len1, len2);
-			goto EXIT2;
-		}
-
 		pos = 0;
 		buf_least = min(len1, len2);
+		if (len1 < len2)
+			buf1[len1] = buf1[len1 + 1] = 0xff;
+		else
+			buf2[len2] = buf2[len2 + 1] = 0xff;
+			
+		buf_least = min(alignment(buf_least, LINE_LENGTH), max(len1, len2));
 		while(buf_least > 0)
 		{
 			line1 = buf1 + pos;
@@ -219,19 +234,29 @@ int main(int argc, char *argv[])
 
 				p1++; p2++;
 			}	
-	
+
 			if (mask)
 				print_diff(global_pos, mask, line1, line2, len);
 			pos += len;
 			global_pos += len;
 			buf_least -= len;
 		}
+		buf_least = alignment(min(len1, len2), LINE_LENGTH);
+		if (len1 - buf_least > 0)
+		{
+			print_file1(buf1, len1 - buf_least);
+		}
+		else if (len2 - buf_least > 0)
+		{
+			print_file2(buf2, len2 - buf_least);
+		}
 
-		least -= min(len1, len2);
+		least -= max(len1, len2);
 
 		if (least < 0)
 		{
 			printf("least OUT (%ld)\n", least);
+			printf("len1 = %d, len2 = %d\n", len1, len2);
 			goto EXIT2;
 		}
 	}
@@ -244,7 +269,7 @@ int main(int argc, char *argv[])
 		{
 			len1 = read(fd1, buf1, read_size);
 			print_file1(buf1, len1);
-			
+
 			least -= len1;
 		}
 	}
@@ -256,10 +281,11 @@ int main(int argc, char *argv[])
 		{
 			len2 = read(fd2, buf2, read_size);
 			print_file2(buf2, len2);
-			
+
 			least -= len2;
 		}
 	}
+
 EXIT:
 	close(fd2);
 	close(fd1);
