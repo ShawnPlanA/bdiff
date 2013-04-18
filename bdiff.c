@@ -134,14 +134,20 @@ static inline long get_file_length(int fd)
 static inline int get_block_size(void )
 {
 	struct stat f_stat;
-	int fd = open(".", O_RDONLY);
-
+	int err = 0;
+	int fd;
+	
+	fd = open(".", O_RDONLY);
 	if (fd == -1)
 	{
 		return -1;
 	}
 
-	if (fstat(fd, &f_stat) < 0)
+	err = fstat(fd, &f_stat);
+
+	close(fd);
+
+	if (err < 0)
 		return -2;
 	else
 		return f_stat.st_blksize;
@@ -160,7 +166,7 @@ int main(int argc, char *argv[])
 	long length, least;
 	int i, pos;
 	int blksize;
-	int bufsize, buf_least;
+	int bufsize, buf_least, print_size;
 	int read_size;
 
 	if (argc < 2)
@@ -196,7 +202,7 @@ int main(int argc, char *argv[])
 	length2 = get_file_length(fd2);
 
 	least = length = max(length1, length2); 
-	bufsize = min(max(length1, length2), (long)blksize);
+	bufsize = min(length, (long)blksize);
 	bufsize = alignment(bufsize, LINE_LENGTH);
 
 	buf1 = malloc(bufsize * sizeof(uint8));
@@ -205,7 +211,6 @@ int main(int argc, char *argv[])
 	read_size = bufsize;
 	while(least > 0)
 	{
-		//read_size = max(min((long)bufsize, least), (long)LINE_LENGTH);
 		len1 = read(fd1, buf1, read_size);
 		len2 = read(fd2, buf2, read_size);
 
@@ -216,7 +221,7 @@ int main(int argc, char *argv[])
 		else
 			buf2[len2] = buf2[len2 + 1] = 0xff;
 			
-		buf_least = min(alignment(buf_least, LINE_LENGTH), max(len1, len2));
+		print_size = buf_least = min(alignment(buf_least, LINE_LENGTH), max(len1, len2));
 		while(buf_least > 0)
 		{
 			line1 = buf1 + pos;
@@ -237,26 +242,28 @@ int main(int argc, char *argv[])
 
 			if (mask)
 				print_diff(global_pos, mask, line1, line2, len);
+
 			pos += len;
 			global_pos += len;
 			buf_least -= len;
 		}
-		buf_least = alignment(min(len1, len2), LINE_LENGTH);
-		if (len1 - buf_least > 0)
+
+		if (len1 - print_size > 0)
 		{
-			print_file1(buf1, len1 - buf_least);
+			print_file1(buf1, len1 - print_size);
 		}
-		else if (len2 - buf_least > 0)
+		else if (len2 - print_size > 0)
 		{
-			print_file2(buf2, len2 - buf_least);
+			print_file2(buf2, len2 - print_size);
 		}
 
 		least -= max(len1, len2);
 
 		if (least < 0)
 		{
-			printf("least OUT (%ld)\n", least);
-			printf("len1 = %d, len2 = %d\n", len1, len2);
+			printf("least OUT (%ld) "
+				"len1=%d, len2=%d\n", least, len1, len2);
+
 			goto EXIT2;
 		}
 	}
@@ -291,6 +298,7 @@ EXIT:
 	close(fd1);
 
 	return 0;
+
 EXIT2:
 	close(fd1);
 EXIT1:
