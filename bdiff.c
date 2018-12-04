@@ -35,7 +35,10 @@ static inline void print_diff(unsigned long global_pos, unsigned int diff_mask,
 		if (line1[i] == 0xff && line1[i+1] == 0xff)
 			break;
 		mask = diff_mask & (1 << i);
-		printf("%c%02X%c", mask ? '[' : ' ', (unsigned int)line1[i], mask ? ']' : ' ');
+		if(mask)
+			printf("\x1b[32m%c%02X%c\x1b[0m", '[', (unsigned int)line1[i], ']');
+		else
+			printf("%c%02X%c", ' ', (unsigned int)line1[i], ' ');
 	}
 
 	if (i < LINE_LENGTH)
@@ -52,7 +55,10 @@ static inline void print_diff(unsigned long global_pos, unsigned int diff_mask,
 		if (line2[i] == 0xff && line2[i+1] == 0xff)
 			break;
 		mask = diff_mask & (1 << i);
-		printf("%c%02X%c", mask ? '[' : ' ', (unsigned int)line2[i], mask ? ']' : ' ');
+		if(mask)
+			printf("\x1b[32m%c%02X%c\x1b[0m", '[', (unsigned int)line2[i], ']');
+		else
+			printf("%c%02X%c", ' ', (unsigned int)line2[i], ' ');
 	}
 
 	printf("\n");
@@ -209,6 +215,16 @@ int main(int argc, char *argv[])
 	buf2 = malloc(bufsize * sizeof(uint8));
 
 	read_size = bufsize;
+
+	printf("\n---------------------------------------------------------------------------------------------------------------------------------------------\n");
+	printf("\t ");
+	for(i=0; i<16; i++)
+		printf("  %2X", i);
+	printf("\x1b[32m  #\x1b[0m");
+	for(i=0; i<16; i++)
+		printf("  %2X", i);
+	printf("\n");
+	printf("---------------------------------------------------------------------------------------------------------------------------------------------\n");
 	while(least > 0)
 	{
 		len1 = read(fd1, buf1, read_size);
